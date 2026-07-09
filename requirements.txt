@@ -1,6 +1,18 @@
 # LLaMA-Factory provides the training/inference entry points (llamafactory-cli).
 # torch should be installed first with the CUDA build matching your system:
 #   https://pytorch.org/get-started/locally/
-llamafactory[metrics]>=0.9
+llamafactory>=0.9
+# nltk/jieba/rouge-chinese power the BLEU/ROUGE metrics LLaMA-Factory computes
+# for `predict_with_generate` (see config/emotion_llama3_predict.yaml). Pinned
+# directly instead of via `llamafactory[metrics]`: llamafactory>=0.9.4 dropped
+# that extras group entirely, and >=0.9.4 requires Python>=3.11 -- i.e. it is
+# what `pip install` resolves to on any Python 3.11+ interpreter today. With
+# only `llamafactory[metrics]`, pip/uv silently installs LLaMA-Factory *without*
+# these three packages (unknown-extra warning, easy to miss), and running
+# `llamafactory-cli train config/emotion_llama3_predict.yaml` then crashes with
+# `NameError: name 'jieba' is not defined` inside ComputeSimilarity.
+nltk>=3.8
+jieba>=0.42
+rouge-chinese>=1.0
 # Optional, for 16 GB GPUs (QLoRA): quantization_bit: 4 in the training config
 bitsandbytes>=0.43; platform_system != "Darwin"

@@ -16,3 +16,8 @@ jieba>=0.42
 rouge-chinese>=1.0
 # Optional, for 16 GB GPUs (QLoRA): quantization_bit: 4 in the training config
 bitsandbytes>=0.43; platform_system != "Darwin"
+# Optional: the training config sets `flash_attn: fa2`, but the flash-attn wheel
+# needs a matching CUDA/torch build and is slow to compile, so it is not pinned
+# here. Without it, LLaMA-Factory warns and falls back to PyTorch SDPA attention
+# automatically -- training still runs, just without the FlashAttention-2 kernel.
+#   pip install flash-attn --no-build-isolation

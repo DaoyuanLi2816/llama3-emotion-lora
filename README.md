@@ -27,18 +27,20 @@
 - [Contact](#contact)
 ## Introduction
 
-This project explores emotion text classification using the Llama3-8b model, enhanced with LoRA and FlashAttention techniques. The model is optimized for identifying six emotion categories: joy, sadness, anger, fear, love, and surprise. The Llama3-8b model demonstrates superior performance with an accuracy of 0.9262, surpassing other transformer models such as Bert-Base, Bert-Large, Roberta-Base, and Roberta-Large.
+This project explores emotion text classification using the Llama3-8b model, enhanced with LoRA and FlashAttention techniques. The model is optimized for identifying six emotion categories: joy, sadness, anger, fear, love, and surprise. The Llama3-8b model demonstrates superior performance with an accuracy of 0.9262, surpassing other transformer models such as BERT-Base, BERT-Large, RoBERTa-Base, and RoBERTa-Large.
+
+Concretely, this repository is the [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) YAML configs, dataset, and evaluation script needed to reproduce that result end to end — training and inference are driven entirely through `llamafactory-cli`, with no custom training loop implemented here (see [Setup](#setup) and [Repository Notes](#repository-notes)).
 
 ## Background
 
-Natural Language Processing (NLP) has become a key focus area for sentiment analysis, also known as sentiment classification or sentiment detection. This technology helps businesses understand consumer emotions and opinions, enhancing customer satisfaction and product development. The vast amount of data in large companies makes manual analysis impractical, leading to the adoption of AI and NLP algorithms.
+Natural Language Processing (NLP) has become a key focus area for sentiment analysis, also known as sentiment classification or sentiment detection. This technology helps businesses understand consumer emotions and opinions, enhancing customer satisfaction and product development. The vast amount of data in large companies makes manual analysis impractical, leading to the adoption of AI and NLP algorithms. This project targets a more fine-grained version of that problem — six-class emotion classification (joy, sadness, anger, fear, love, surprise) rather than coarse positive/negative/neutral sentiment — using an instruction-tuned LLM instead of a traditional sentiment-analysis pipeline.
 
 ## Key Features
 
-- **Model**: Llama3-8b, fine-tuned using supervised learning.
-- **Techniques**: Utilized LoRA for efficient parameter tuning and FlashAttention for optimized attention computation.
-- **Dataset**: Emotion text dataset with six categories.
-- **Performance**: Achieved an accuracy of 0.9262, surpassing other NLP models.
+- **Model**: `meta-llama/Meta-Llama-3-8B-Instruct`, fine-tuned via supervised LoRA fine-tuning (SFT).
+- **Techniques**: LoRA for efficient parameter tuning, FlashAttention-2 for optimized attention computation.
+- **Dataset**: Six-class emotion text dataset (16,000 train / 2,000 test records).
+- **Performance**: 92.62% accuracy, surpassing BERT and RoBERTa baselines (Table 3).
 
 ## Methods
 
@@ -106,7 +108,7 @@ LoRA (Low-Rank Adaptation) is a technique used to integrate trainable rank decom
 
 ### Flash Attention V2
 
-FlashAttention V2 is an optimization technique designed to accelerate the attention mechanism in Transformer models. It focuses on improving computational efficiency and reducing memory usage during training. FlashAttention achieves this by breaking down attention computation into smaller, more manageable chunks, thereby enhancing cache utilization and reducing memory access. Additionally, it employs sparse matrix operations to leverage the sparsity in attention mechanisms, which helps bypass unnecessary computations. Pipelined operations enable parallel execution of different computation stages, further minimizing processing time.
+FlashAttention V2 is an optimization technique designed to accelerate the attention mechanism in Transformer models. It is an *exact* algorithm — it computes the same attention output as standard attention, not an approximation — but is IO-aware: it tiles the Q/K/V matrices into blocks that fit in fast on-chip SRAM and computes softmax incrementally ("online softmax"), so the full N×N attention matrix is never materialized in slower GPU HBM. This sharply cuts the number of HBM reads/writes, which is the actual bottleneck for attention on modern GPUs, reducing both memory usage and wall-clock time versus standard attention without changing the result.
 
 ## Experimentation
 
@@ -118,7 +120,7 @@ FlashAttention V2 is an optimization technique designed to accelerate the attent
 
 ### Data Analysis
 
-The dataset used for training the model consists of text labeled with six emotions: joy, sadness, anger, fear, love, and surprise. The distribution of the dataset is relatively balanced, with "Joy" being the most common emotion and "Surprise" the least. This balanced distribution provides a strong foundation for the model to accurately classify emotions without bias towards any particular category.
+The dataset used for training the model consists of text labeled with six emotions: joy, sadness, anger, fear, love, and surprise. The distribution is imbalanced: "joy" and "sadness" together make up roughly 63% of the training set, while "love" and "surprise" combined make up under 12% (Figure 3). Overall accuracy alone can be a misleading metric under this kind of skew, which is why `scripts/evaluate.py` reports per-class accuracy in addition to the overall number (see [Evaluation Metrics](#evaluation-metrics)).
 
 ### Experiment Settings
 
@@ -133,11 +135,15 @@ The Llama3-8b model's hyperparameters are set as follows:
         </tr>
         <tr>
             <td>Optimizer</td>
-            <td>Adam</td>
+            <td>AdamW</td>
         </tr>
         <tr>
             <td>Learning Rate</td>
             <td>5e-5</td>
+        </tr>
+        <tr>
+            <td>LR Scheduler</td>
+            <td>Cosine, 10% warmup</td>
         </tr>
         <tr>
             <td>Batch Size</td>
@@ -162,25 +168,21 @@ The Llama3-8b model's hyperparameters are set as follows:
     </table>
 </div>
 
-The model is trained using the Adam optimizer, known for its adaptive learning rate capabilities. A cosine learning rate schedule is employed to adjust the learning rate during training. The batch size is set to 5, with gradient accumulation over 4 steps to optimize memory usage. The model is trained for 3 epochs, with the FP16 precision format used to save GPU memory while maintaining performance. The LoRA rank of 8 indicates the order of the low-rank matrix used in the adaptation process.
+The model is trained using the AdamW optimizer (LLaMA-Factory's default, decoupling weight decay from the adaptive learning-rate update). A cosine learning rate schedule with a 10% linear warmup is employed to adjust the learning rate during training. The batch size is set to 5, with gradient accumulation over 4 steps to optimize memory usage. The model is trained for 3 epochs, with the FP16 precision format used to save GPU memory while maintaining performance. The LoRA rank of 8 indicates the order of the low-rank matrix used in the adaptation process.
 
 ### Evaluation Metrics
 
-The primary metric used to evaluate the model's performance is accuracy. This metric measures the proportion of correct predictions made by the model out of all predictions. The formula for accuracy is:
+The primary metric used to evaluate the model's performance is accuracy. This metric measures the proportion of correct predictions made by the model out of all predictions. Since this is a six-class problem rather than binary, accuracy is computed directly over all classes:
 
 $$
-\text{Accuracy} = \frac{\text{TP} + \text{TN}}{\text{TP} + \text{FP} + \text{FN} + \text{TN}}
+\text{Accuracy} = \frac{\text{Number of Correct Predictions}}{\text{Total Number of Predictions}}
 $$
 
-Where:
-- TP = True Positive
-- FP = False Positive
-- FN = False Negative
-- TN = True Negative
+`scripts/evaluate.py` also reports this per class (see [Usage](#usage)), since an overall average can mask weak performance on minority classes like "surprise," which has roughly 9x fewer training examples than "joy" (Figure 3).
 
 ### Experiment Analysis
 
-The model's performance is compared against other popular NLP models, such as Bert-Base, Bert-Large, Roberta-Base, and Roberta-Large. The Llama3-8b model achieves the highest accuracy of 0.9262, demonstrating the effectiveness of instruction fine-tuning and the model's large parameter set. The superior performance of Llama3-8b in this task underscores the advantages of large language models in achieving high accuracy across diverse and challenging text classification tasks.
+The model's performance is compared against other popular NLP models, such as BERT-Base, BERT-Large, RoBERTa-Base, and RoBERTa-Large. The Llama3-8b model achieves the highest accuracy of 0.9262, demonstrating the effectiveness of instruction fine-tuning and the model's large parameter set. The superior performance of Llama3-8b in this task underscores the advantages of large language models in achieving high accuracy across diverse and challenging text classification tasks.
 
 <div align="center">
     <table>
@@ -190,19 +192,19 @@ The model's performance is compared against other popular NLP models, such as Be
             <th>Accuracy</th>
         </tr>
         <tr>
-            <td>Bert-Base</td>
+            <td>BERT-Base</td>
             <td>0.9063</td>
         </tr>
         <tr>
-            <td>Bert-Large</td>
+            <td>BERT-Large</td>
             <td>0.9086</td>
         </tr>
         <tr>
-            <td>Roberta-Base</td>
+            <td>RoBERTa-Base</td>
             <td>0.9125</td>
         </tr>
         <tr>
-            <td>Roberta-Large</td>
+            <td>RoBERTa-Large</td>
             <td>0.9189</td>
         </tr>
         <tr>
@@ -219,12 +221,14 @@ This project uses [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) as a
 ```bash
 git clone https://github.com/DaoyuanLi2816/llama3-emotion-lora.git
 cd llama3-emotion-lora
-pip install -r requirements.txt   # llamafactory[metrics]; bitsandbytes for 16 GB GPUs
+pip install -r requirements.txt   # llamafactory + nltk/jieba/rouge-chinese for metrics; bitsandbytes for 16 GB GPUs
 huggingface-cli login             # the Llama3 weights are gated
 ```
+
+`flash_attn: fa2` in the training config asks LLaMA-Factory for FlashAttention-2, but the `flash-attn` package itself is not pinned in `requirements.txt` (it needs a matching CUDA/torch build and is slow to compile from source). Without it installed, LLaMA-Factory logs a warning and falls back to PyTorch's SDPA attention automatically — training still runs correctly, just without the FlashAttention-2 kernel. Install it separately with `pip install flash-attn --no-build-isolation` to match the reported setup exactly.
 ## Usage
 
-Fine-tune Llama3-8b with LoRA on the emotion dataset (hyperparameters exactly as reported in Table 2 — Adam lr 5e-5, cosine schedule, batch 5 × grad-accum 4, 3 epochs, LoRA rank 8, max length 512, fp16, FlashAttention-2):
+Fine-tune Llama3-8b with LoRA on the emotion dataset (hyperparameters exactly as reported in Table 2 — AdamW lr 5e-5, cosine schedule with 10% warmup, batch 5 × grad-accum 4, 3 epochs, LoRA rank 8, max length 512, fp16, FlashAttention-2):
 
 ```bash
 llamafactory-cli train config/emotion_llama3_lora.yaml
@@ -245,7 +249,7 @@ The model is trained and evaluated on a six-class emotion dataset:
 - `data/emotion_train.json` - training split.
 - `data/emotion_test.json` - test split.
 
-Each record is an instruction-style example asking the model to classify a piece of text into one of six emotions: **joy, sadness, anger, fear, love, surprise**. The label distribution is relatively balanced, with "joy" the most frequent and "surprise" the least.
+Each record is an instruction-style example asking the model to classify a piece of text into one of six emotions: **joy, sadness, anger, fear, love, surprise**. The label distribution is imbalanced — "joy" is the most frequent class and "surprise" the least (roughly 9x fewer examples); see [Data Analysis](#data-analysis) and Figure 3.
 ## Conclusion
 
 This project demonstrates the potential of large language models, such as Llama3-8b, in domain-specific tasks like emotion text classification. The model's performance, boosted by specialized techniques like LoRA and FlashAttention, underscores the effectiveness of large models in achieving high accuracy in NLP applications.
